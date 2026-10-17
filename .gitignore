@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+reports/
+*.pcap
+*.pcapng
+config/config.yaml
+.codex-remote-attachments/
+custom_components/epever_local/native_init.bin
+*.bin
+*.zip
+.env
+.env.*
+secrets.yaml

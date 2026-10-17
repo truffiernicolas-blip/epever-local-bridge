@@ -1,0 +1,12 @@
+{
+  "domain": "epever_local",
+  "name": "EPEVER Local",
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/truffiernicolas-blip/epever-local-bridge",
+  "iot_class": "local_polling",
+  "integration_type": "device",
+  "requirements": [],
+  "codeowners": [],
+  "issue_tracker": "https://github.com/truffiernicolas-blip/epever-local-bridge/issues"
+}

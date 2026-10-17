@@ -1,0 +1,21 @@
+{
+  "title": "EPEVER Local",
+  "config": {
+    "step": {
+      "user": {
+        "title": "EPEVER UP5000-HM8042 — lecture locale",
+        "description": "Lecture seule via la clé RJ45 D. Fermez Solar Guardian pendant la connexion. Les valeurs PV/batterie peuvent être nulles si ces équipements sont absents.",
+        "data": {
+          "host": "Adresse IP de la clé",
+          "port": "Port TCP local",
+          "unit": "Identifiant de communication",
+          "interval": "Intervalle de lecture (secondes)",
+          "battery_present": "Batterie installée",
+          "pv_present": "Panneaux installés"
+        }
+      }
+    },
+    "error": {"cannot_connect": "Lecture impossible. Vérifiez l'adresse, le port, l'identifiant et fermez Solar Guardian. La session native du dongle doit être présente dans le dossier de l'intégration."},
+    "abort": {"already_configured": "Cette passerelle est déjà configurée."}
+  }
+}

@@ -1,0 +1,2 @@
+# La sonde TCP utilise uniquement la bibliothèque standard Python 3.10+.
+# Optionnel pour analyser les captures : pip install -r requirements-capture.txt
