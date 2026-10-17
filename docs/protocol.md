@@ -1,95 +1,96 @@
-# Diagnostic des protocoles
+# Protocole local RJ45 D / UPower-Hi
 
-> Les adresses LAN et noms Wi-Fi de ce document sont anonymisés et illustratifs.
+## Transport
 
-**Mise à jour après capture Android :** le chemin natif **TCP 8899 + initialisation
-de session + Modbus RTU, unité 10** fonctionne depuis Python sur le LAN. Voir
-[la preuve de lecture](capture-2026-10-17.md). Les hypothèses ci-dessous décrivent
-le point de départ de l'investigation, avant cette preuve.
+Le service natif est un flux **TCP sur le port 8899**. Après initialisation de
+session, il transporte des trames **Modbus RTU avec CRC16**, sans en-tête MBAP.
+Le client conserve la connexion pour les acquisitions successives.
 
-## Hypothèses à distinguer
+L'adresse AP de référence est 10.10.100.254 ; sur le LAN, utiliser l'adresse
+attribuée à la clé. Ce service est distinct des paramètres du canal TCP
+Client/Server général. Un accès Modbus TCP standard ne remplace pas cette session.
 
-| Transport / protocole | Preuve attendue | Statut actuel |
+## Initialisation native
+
+| Requête | Taille | Signification |
 |---|---|---|
-| Modbus RTU sur TCP | Trames avec CRC RTU valide et réponse corrélée | Plausible RJ45 D, non testé ici |
-| Modbus TCP natif | En-tête MBAP, transaction et longueur cohérents | Non confirmé |
-| TCP propriétaire | Enveloppe et sessions reproductibles | Inconnu |
-| UDP propriétaire | Capture des datagrammes et réponse de service | Inconnu |
-| HTTP local | Réponse HTTP et interface accessible | À sonder |
-| Série encapsulée | Analyse structurée de plusieurs messages | Inconnu |
-| Cloud | Flux DNS/TCP/UDP observés côté passerelle | Aucune capture fournie |
+| Type | 1 octet | 0x10 |
+| Longueur | 1 octet | 0x1E, taille des données qui suivent |
+| Longueur identifiant | 2 octets, big-endian | 0x0016 |
+| Identifiant passerelle | 22 octets | Numéro de série ASCII |
+| Suffixe | 6 octets | Données opaques propres au format pris en charge |
 
-502, 8088 et 9999 sont seulement des candidats. Aucun protocole n'est inféré
-automatiquement du numéro de port. La sonde actuelle ne transmet aucune fonction
-Modbus. Un futur transport autorisera seulement les lectures prévues ; les réponses
-devront vérifier identifiant, fonction, longueur, transaction ou CRC et exceptions.
+La requête prise en charge mesure 32 octets. Le projet ne suppose pas que le
+suffixe soit une constante ou un mot de passe universel. L'initialisation est
+importée comme une trame opaque, conservée hors du dépôt et envoyée avant les lectures.
 
-## Carte de registres
+La réponse commence par 0x20 et une longueur sur un octet. Le corps contient
+une longueur de chaîne big-endian sur deux octets, puis une chaîne ASCII de
+version. Le format de référence retourne V1.0.17. Ce champ n'est pas la version
+du firmware de l'interface web.
 
-Avant la capture, aucun registre n'était validé par une réponse de cet exemplaire.
-Les premiers registres réseau/sortie AC sont désormais lus en Python, avec CRC valide.
-Pour les autres mesures,
-des mesures PV, batterie, AC, réseau et diagnostic demandées, adresse, fonction,
-nombre de mots, signe, ordre des mots, échelle, unité et valeur sentinelle restent
-à confirmer. L'existence d'un SOC ou d'un compteur ne sera pas présumée.
-Ne pas convertir les adresses 3xxxx/4xxxx sans vérifier la convention du document.
-Ne pas calculer une puissance, un SOC ou une énergie à partir d'autres grandeurs
-sans méthode et limites explicites. Les valeurs absentes resteront indisponibles.
+## Trames Modbus
 
-Le décodeur futur sera séparé du transport et sélectionné par modèle/version de
-carte confirmés. Une exception Modbus prouve éventuellement un interlocuteur
-Modbus, pas la signification physique des registres.
+Une requête FC04 contient : unité, fonction 0x04, adresse 16 bits big-endian,
+nombre de registres 16 bits big-endian et CRC16 Modbus little-endian.
+Chaque registre de réponse contient un mot 16 bits big-endian.
 
-## Captures sur un réseau contrôlé
+L'identifiant de référence UPower-Hi est **10**. L'adresse réelle configurée sur
+l'onduleur prévaut. L'intégration utilise uniquement **FC04** et **FC02** ;
+aucune fonction d'écriture n'est implémentée.
 
-Sur une passerelle/routeur ou un port miroir qui voit effectivement le trafic de
-la clé (un PC ordinaire sur un switch ne voit pas nécessairement ses flux cloud) :
+La réponse est contrôlée sur l'identifiant, la fonction, la taille et le CRC.
+Les exceptions Modbus sont distinguées d'une trame invalide. Les lectures sont
+séquentielles ; une réponse invalide ou un timeout ferme la session avant reconnexion.
 
-```sh
-tcpdump -i eth0 -nn -s 0 -w epever.pcap host 192.168.1.100
-```
+## Carte de registres implémentée
 
-Remplacer interface et IP ; arrêter après une courte fenêtre représentative.
-Wireshark : filtre d'affichage `ip.addr == 192.168.1.100`, puis examiner
-Conversations, DNS et sens des connexions. Ne pas intercepter TLS ni extraire
-de secrets. Les fichiers bruts peuvent néanmoins contenir des données sensibles.
+Toutes les adresses ci-dessous sont hexadécimales, directement utilisées dans
+les requêtes. Les valeurs 32 bits occupent le mot bas à l'adresse de départ,
+puis le mot haut à l'adresse suivante. Leur valeur est low | (high << 16).
 
-```sh
-python epever_probe.py --host 192.168.1.100 --offline --pcap epever.pcap
-```
+| Adresse | Mesure | Type | Échelle / unité |
+|---|---|---|---|
+| 3500 | Tension réseau | uint16 | /100 V |
+| 3501 | Courant de charge réseau | uint16 | /100 A |
+| 3502–3503 | Puissance de charge réseau | uint32 | /100 W |
+| 3504 | Fréquence réseau | uint16 | /100 Hz |
+| 350F–3510 | Énergie cumulée de charge réseau | uint32 | /100 kWh |
+| 3511 | Code état charge réseau | uint16 | Brut |
+| 3513–3514 | Températures chargeur / puissance | int16 | /100 °C |
+| 3521 | Tension sortie AC | uint16 | /100 V |
+| 3522 | Courant sortie AC | uint16 | /100 A |
+| 3523 | Code état sortie AC | uint16 | Brut |
+| 3529 | Fréquence sortie AC | uint16 | /100 Hz |
+| 3530–3531 | Énergie cumulée sortie AC | uint32 | /100 kWh |
+| 3532–3533 | Températures dissipateurs 1 / 2 | int16 | /100 °C |
+| 3549 | Tension PV | uint16 | /100 V |
+| 354A | Courant PV | uint16 | /100 A |
+| 354B–354C | Puissance PV | uint32 | /100 W |
+| 3557–3558 | Énergie cumulée PV | uint32 | /100 kWh |
+| 3559 | Code état PV | uint16 | Brut |
+| 3580 | Tension batterie | uint16 | /100 V |
+| 3581–3582 | Courant batterie | int32 | /100 A, positif en charge |
+| 3586 | SOC batterie | uint16 | % |
+| 3589 | Code état batterie | uint16 | Brut |
+| 2100, FC02 | Bypass réseau | Bit | 1 : bypass, 0 : sans bypass |
 
-Scapy lit le fichier hors ligne : flux, compteurs et noms DNS uniquement. Pas de
-réassemblage TCP, d'extraction de secrets ni de décodeur binaire à ce stade.
-L'absence de paquets ne prouve pas l'absence de service. Le scan UDP générique
-n'est pas implémenté : le silence UDP ne permet pas de conclure qu'un port est fermé.
+Le SOC hors de la plage 0–100 est indisponible. Les sentinelles de température
+0x7FFF et 0xFFFF sont traitées comme indisponibles. Les codes d'état sont exposés
+bruts ; aucune traduction complète des alarmes n'est fournie.
 
-## Document UP-HI retrouvé et outil de lecture ponctuelle
+Le décodage s'appuie sur la carte UP-HI V8.5 et l'implémentation du client. La
+lecture des registres ne valide pas l'exactitude métrologique de chaque grandeur
+sur toutes les variantes. La plage non nulle de courant batterie, le SOC et les
+mesures photovoltaïques requièrent une validation avec les équipements concernés.
 
-Une [copie du document UP-HI V8.5](https://forum.iobroker.net/assets/uploads/files/1667825519362-up-hi-communication-protocol-v8.5.pdf)
-est désormais accessible (hébergement tiers ; version effective de l'onduleur à confirmer).
-Extraits utiles, fonction **04**, adresses hexadécimales :
+## Règles d'interprétation
 
-| Mesure candidate | Adresse | Décodage documentaire |
-|---|---|---|
-| Tension réseau | 3500 | uint16 /100 V |
-| Tension AC sortie | 3521 | uint16 /100 V |
-| Tension PV | 3549 | uint16 /100 V |
-| Courant PV | 354A | uint16 /100 A |
-| Puissance PV | 354B–354C | mots bas/haut, /100 W |
-| Énergie PV cumulée | 3557–3558 | mots bas/haut, /100 kWh |
-| Tension batterie | 3580 | uint16 /100 V |
-| Courant batterie | 3581–3582 | signé, mots bas/haut, /100 A ; charge positive |
-| SOC | 3586 | uint16 % |
+Les zéros reçus ne sont pas assimilés à une panne de communication. Les registres
+absents ne sont pas remplacés par zéro. L'état sans batterie doit être pris en
+compte avant d'interpréter le SOC. Les énergies proviennent des compteurs exposés,
+sans intégration logicielle de la puissance. Aucune puissance active de sortie
+n'est déduite du produit tension × courant.
 
-Ces interprétations ne sont pas validées sur le matériel de l'utilisateur.
-L'outil ne publie donc pas ces grandeurs comme des mesures acquises.
-
-```sh
-python tools/read_inputs.py --host 192.168.1.100 --port 9999 --unit 10 --address 0x3580
-```
-
-Utiliser seulement si le serveur TCP est activé. Le code ne construit que des
-requêtes FC04, interdit l'adresse broadcast, limite à 16 registres, contrôle CRC,
-identifiant, fonction et longueur, et gère la fragmentation TCP. Le rapport
-contient les trames de cette lecture, pas d'identifiants réseau. Une adresse et
-une unité doivent être choisies d'après le matériel ; pas de balayage automatique.
+Voir les [références techniques](references.md) et le client
+custom_components/epever_local/client.py pour les plages de lecture autorisées.

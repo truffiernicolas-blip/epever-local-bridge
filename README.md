@@ -1,119 +1,111 @@
 # EPEVER Local Telemetry Bridge
 
-Read an **EPEVER UP5000-HM8042** locally through an **EPEVER WiFi 2.4G RJ45 D**
-and expose telemetry directly in Home Assistant. No EPEVER cloud account,
-MQTT broker or always-on PC is required for the Home Assistant integration.
+Intégration Home Assistant pour lire la télémétrie d'un **EPEVER UP5000-HM8042**
+sur le réseau local avec une clé **EPEVER WiFi 2.4G RJ45 D**.
 
-Experimental, read-only, MIT licensed. Independent community project, not an
-official EPEVER integration. LAN addresses in the documentation are examples.
+Le Raspberry Pi ou le serveur Home Assistant interroge directement la clé.
+L'acquisition fonctionne sans compte cloud EPEVER, sans broker MQTT et sans PC
+intermédiaire. Le logiciel fonctionne exclusivement en lecture seule.
 
-## Confirmed setup
+## Fonctionnalités
 
-- UP5000-HM8042 inverter/charger and WiFi 2.4G RJ45 D adapter.
-- Adapter firmware NW9272_LPT270_HuiNeng_V1.0.19, HF-LPT270 module.
-- Solar Guardian Android 2.2.7 local mode, UP HI, communication ID 10.
-- Home Assistant OS on Raspberry Pi 5, Core 2026.10.1.
-- Native TCP **8899**, gateway initialization followed by **Modbus RTU with CRC**.
+- 26 entités réunies sous un équipement EPEVER UP5000-HM8042.
+- Tensions et fréquences réseau/sortie AC, courant de sortie et énergie consommée.
+- Tension, courant, puissance et énergie photovoltaïques.
+- Tension, courant, SOC et code d'état batterie.
+- Températures internes, bypass réseau, codes d'état et dernière lecture réussie.
+- Connexion TCP persistante, contrôle CRC, timeouts et reconnexion progressive.
+- Capteurs indisponibles en cas d'erreur ; aucune substitution automatique par zéro.
+- Compteurs en kWh avec les métadonnées statistiques Home Assistant.
 
-Other adapter generations and inverter families are unverified. Do not reuse a
-Tracer register map for UP HI. Bare Modbus reads do not reproduce the required
-native session on the tested adapter. No TCP-server reconfiguration was needed.
+L'intervalle configuré par défaut est de 5 secondes. La cadence effective inclut
+le temps des lectures séquentielles, généralement environ 6 à 7 secondes.
 
-## Sensors
+## Compatibilité
 
-26 read-only entities under one device: grid/output voltage and frequency, output
-current and cumulative energy, PV voltage/current/power/energy, battery
-voltage/current/SOC, temperatures, raw status codes, bypass mode and last read time.
-There are no switches, inverter writes or firmware changes.
+| Élément | Référence prise en charge |
+|---|---|
+| Onduleur/chargeur | EPEVER UP5000-HM8042, gamme UPower-Hi |
+| Adaptateur Wi-Fi | EPEVER WiFi 2.4G RJ45 D |
+| Module Wi-Fi | HF-LPT270 |
+| Firmware de référence | NW9272_LPT270_HuiNeng_V1.0.19 |
+| Transport local | TCP 8899 avec initialisation native puis Modbus RTU |
+| Identifiant Modbus | 10 par défaut pour UP HI ; utiliser l'identifiant réel |
+| Plateforme de référence | Home Assistant OS, Core 2026.10.1, Raspberry Pi 5 |
 
-Default polling interval: 5 seconds; observed refresh cadence about 6–7 seconds
-including sequential reads. One persistent connection is shared by all sensors.
-Failed polls mark entities unavailable and reconnect with backoff. Missing registers
-are not filled with zeros. Energy counters use kWh and total_increasing.
+Les autres modèles et versions ne sont pas validés. Les registres UPower-Hi
+diffèrent de ceux des contrôleurs Tracer. Le projet n'est pas affilié à EPEVER.
 
-Without battery/panels, the corresponding registers may return zero. Equipment
-presence is recorded in sensor attributes; SOC zero without a battery does not
-mean a discharged battery. Output active power is not invented from voltage × current.
+## Installation
 
-## Home Assistant installation
+1. Télécharger le dépôt et préparer le fichier privé **native_init.bin** de la
+   passerelle, comme décrit dans le [guide d'installation](docs/home_assistant.md).
+2. Copier le dossier **custom_components/epever_local**, avec native_init.bin et
+   translations, dans le répertoire custom_components de Home Assistant.
+3. Redémarrer Home Assistant, puis ouvrir **Paramètres → Appareils et services →
+   Ajouter une intégration → EPEVER Local**.
+4. Renseigner l'adresse de la clé, le port **8899**, l'identifiant de communication,
+   l'intervalle et la présence éventuelle d'une batterie ou de panneaux.
 
-The public repository contains **no gateway session data**. This initial release
-needs a capture of **your own** Solar Guardian local session. A generic session
-initializer independent of captures is not implemented yet.
+L'installation est manuelle ; l'intégration n'est pas distribuée dans le catalogue
+HACS par défaut. Le fichier d'initialisation est propre à la passerelle et n'est
+pas livré dans le dépôt. Sa préparation requiert actuellement un fichier PCAP
+local compatible ; aucun générateur universel d'initialisation n'est fourni.
 
-1. Record a short local Solar Guardian session on Android, for example using
-   PCAPdroid filtered to that app. Start before connecting, display live data
-   for 30–60 seconds, then stop. Keep TLS decryption disabled and do not change
-   settings or press Load Switch while recording. Keep the capture private.
-2. With Python 3.10+ and this repository on a PC:
+## Protocole et mesures
 
-```sh
-python -m pip install -r requirements-capture.txt
-python tools/prepare_ha.py path/to/your-capture.pcap
-```
+La connexion utilise **TCP 8899**, une initialisation native de session, puis des
+trames **Modbus RTU avec CRC16**, sans en-tête MBAP. L'intégration utilise uniquement
+FC04 pour les registres et FC02 pour le bypass. Elle ne modifie ni l'onduleur ni
+la configuration réseau de la clé.
 
-3. Copy custom_components/epever_local into your HA configuration's
-   custom_components directory, **including generated native_init.bin and translations**.
-   Do not copy __pycache__.
-4. Restart Home Assistant. Open **Settings → Devices & services → Add integration →
-   EPEVER Local**. Enter your gateway IP, port **8899**, correct communication ID
-   (10 on the tested UP HI), polling interval and equipment presence.
-5. Open the EPEVER device. Close Solar Guardian if it competes with HA for the connection.
+La [spécification du protocole](docs/protocol.md) décrit les trames, les registres,
+les échelles, l'ordre des mots et les limites d'interprétation.
 
-This is a manual custom integration, not a default HACS repository. Back up HA
-before installation. Disable/remove the integration entry to stop polling.
-No adapter configuration needs to be restored.
+Sans batterie ou panneaux, des registres peuvent légitimement contenir zéro.
+Les attributs battery_installed et panels_installed précisent la configuration.
+Un SOC nul sans batterie ne signifie pas une batterie déchargée. La puissance
+active de sortie n'est pas calculée à partir du seul produit tension × courant.
 
-## Diagnostic tools
+## Outils
 
 ```sh
 python epever_probe.py --host 192.168.1.100
 python epever_probe.py --discover
-python tools/analyze_solar_guardian.py path/to/your-capture.pcap
-python tools/analyze_solar_guardian.py path/to/your-capture.pcap --live-host 192.168.1.100
+python -m pip install -r requirements-capture.txt
+python tools/prepare_ha.py chemin/session.pcap
+python tools/analyze_solar_guardian.py chemin/session.pcap
 ```
 
-The standard-library probe checks candidate TCP ports sequentially and optionally
-reads the local ARP cache. An open port does not identify its protocol. The capture
-analyzer requires Scapy; without --live-host it stays offline. With that option it
-reuses this gateway's initialization in memory for a bounded read-only snapshot.
-Reports go to the ignored reports directory.
+La sonde TCP utilise la bibliothèque standard Python. Les outils PCAP nécessitent
+Scapy. Les adresses de la documentation sont des exemples. Les rapports locaux
+sont enregistrés dans reports et exclus de Git.
 
-UDP scanning, arbitrary proprietary decoding, standalone MQTT publishing and Docker
-deployment are not implemented.
+## Documentation
 
-## Privacy
+- [Matériel et compatibilité](docs/hardware.md)
+- [Installation et configuration Home Assistant](docs/home_assistant.md)
+- [Spécification du protocole et registres](docs/protocol.md)
+- [Architecture et outils](docs/architecture.md)
+- [Références techniques](docs/references.md)
 
-Never publish PCAPs, native_init.bin, session frames, serial numbers, credentials or
-HA backups. The initialization is also stored in the HA config entry; treat backups
-as private. Non-identifier initialization bytes are handled as opaque data, not
-documented as a universal password or constant. Only one hardware/firmware setup
-has been validated.
-
-## Development and research
+## Développement
 
 ```sh
 python -m unittest discover -s tests -v
 python -m compileall -q src tools custom_components
 ```
 
-16 tests cover CRC, fragmentation, exceptions, read restrictions, TCP reassembly,
-initialization, signed current and energy decoding. They run without HA; the
-integration was additionally tested on real Home Assistant OS.
+Les tests couvrent CRC, fragmentation TCP, exceptions, restrictions de lecture,
+initialisation, courant signé et compteurs d'énergie. Le workflow GitHub Actions
+exécute les tests sur Python 3.11, 3.12 et 3.13. Les tests unitaires ne remplacent
+pas une validation de compatibilité sur chaque variante matérielle.
 
-Research notes are in French, with anonymized network examples:
+## Données privées
 
-- [Hardware](docs/hardware.md)
-- [Comparative investigation and sources](docs/investigation.md)
-- [Protocol](docs/protocol.md)
-- [Capture analysis and native port](docs/capture-2026-10-17.md)
-- [Home Assistant](docs/home_assistant.md)
-- [Earlier experiments](docs/trials-2026-10-17.md)
+Conserver les PCAP, native_init.bin, trames de session, numéros de série,
+identifiants et sauvegardes Home Assistant hors des dépôts publics. Les octets
+d'initialisation non identifiants sont traités comme des données opaques, sans
+hypothèse de mot de passe universel. Les captures ne nécessitent aucun déchiffrement TLS.
 
-Primary leads: [EPEVER](https://www.epever.com/),
-[zuzkins/ha-epever](https://github.com/zuzkins/ha-epever) (Tracer AN + RJ45 D,
-not assumed compatible with UP HI), and the
-[UP-HI V8.5 register document](https://forum.iobroker.net/assets/uploads/files/1667825519362-up-hi-communication-protocol-v8.5.pdf)
-(third-party hosting). Vendor manuals are linked, not redistributed.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
+Licence [MIT](LICENSE). Contributions : [CONTRIBUTING.md](CONTRIBUTING.md).

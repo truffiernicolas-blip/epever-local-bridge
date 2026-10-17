@@ -1,81 +1,111 @@
-# Contrat prévu pour Home Assistant
+# Installation Home Assistant
 
-> Les adresses LAN et noms Wi-Fi de ce document sont anonymisés et illustratifs.
+## Prérequis
 
-## Installation vérifiée sur le Raspberry
+- Home Assistant avec accès au dossier de configuration et aux intégrations personnalisées.
+- Clé RJ45 D accessible depuis le serveur sur TCP 8899.
+- Identifiant de communication de l'onduleur ; 10 par défaut pour UP HI.
+- Fichier privé native_init.bin associé à la passerelle.
+- Sauvegarde de la configuration Home Assistant avant installation de code personnalisé.
 
-Les fichiers ont été transférés avec File editor dans un dossier neuf
-`/homeassistant/custom_components/epever_local`, sans modifier `configuration.yaml`
-ni HACS. Home Assistant a été redémarré (aucune automatisation en cours signalée
-par son dialogue), puis l'intégration a été ajoutée depuis Appareils et services.
-Le test de connexion depuis HA et l'acquisition périodique ont réussi.
+La plateforme de référence est Home Assistant OS avec Core 2026.10.1 sur Raspberry
+Pi 5. Aucun broker MQTT, compte EPEVER cloud ni service permanent sur PC n'est requis.
 
-- Appareil : **EPEVER UP5000-HM8042**, intégration **EPEVER Local 0.1.0**.
-- Serveur : 192.168.1.10 ; clé : 192.168.1.100:8899 ; unité 10 ; intervalle 5 s.
-- 26 entités, dont 21 capteurs et 5 diagnostics ; aucune commande de pilotage.
-- Valeurs observées : réseau/sortie environ 247 V, sortie 1,43–1,48 A,
-  fréquences 50 Hz, énergie sortie 43,37 kWh, températures 29–35 °C,
-  mode bypass réseau. PV et batterie à zéro, matériel absent comme déclaré.
-- Mises à jour observées à 20:15:17, 24, 30, 36, 42 et 49 Europe/Paris :
-  cadence effective 6–7 s, temps des lectures séquentielles compris.
-- Les 16 tests Python et la compilation syntaxique ont réussi. La validation
-  sur HA confirme aussi le chargement des modules et la création des entités.
+## Préparation de la session
 
-Accès appareil :
-Paramètres → Appareils et services → EPEVER Local → appareil EPEVER.
-Le dashboard principal existant n'a pas été modifié. Le SOC à zéro est la valeur
-brute de l'onduleur : `battery_installed: false` précise qu'aucune batterie n'est
-présente. Ne pas créer d'alarme batterie faible sur ce zéro sans vérifier cet attribut.
+Cette version importe une initialisation native depuis un fichier PCAP compatible.
+La génération universelle à partir du seul numéro de série n'est pas implémentée.
+Le fichier est spécifique à la passerelle et doit rester privé.
 
-## Déploiement direct préparé le 17 octobre 2026
+Pour fournir une session locale compatible, enregistrer une courte connexion
+Solar Guardian en mode local, avec un outil Android tel que PCAPdroid filtré sur
+l'application. Démarrer l'enregistrement avant la connexion, afficher les mesures
+pendant 30 à 60 secondes, puis arrêter. Ne pas activer de déchiffrement TLS et
+ne pas actionner les commandes de pilotage.
 
-L'installation observée est Home Assistant OS sur Raspberry Pi 5, serveur
-192.168.1.10, Core 2026.10.1, Supervisor 2026.10.2, OS 18.3. File editor et
-Advanced SSH & Web Terminal sont déjà installés ; aucun Mosquitto n'est listé.
+Sur un PC disposant de Python 3.10 ou supérieur :
 
-Pour répondre au souhait de faire interroger directement la clé par HA, une
-intégration native `custom_components/epever_local` a été créée. Elle utilise
-TCP 8899, unité 10, session persistante, lectures FC04 et lecture seule FC02 pour
-le bypass. Intervalle par défaut : 5 secondes. Aucune écriture dans l'onduleur.
-Un coordinateur unique sérialise les lectures et reconnecte avec attente
-progressive après panne ; une mesure manquante reste indisponible, pas zéro.
-Les données numériques reçues à zéro restent affichables, avec attributs
-indiquant l'absence de batterie/panneaux configurée par l'utilisateur.
+```sh
+python -m pip install -r requirements-capture.txt
+python tools/prepare_ha.py chemin/session.pcap
+```
 
-Le fichier privé `native_init.bin` est issu de la capture de ce dongle, exclu
-de Git. Il doit être conservé pour une nouvelle configuration. La session est
-également enregistrée dans l'entrée d'intégration HA ; sauvegarder la configuration
-HA comme donnée privée. Aucun compte ni mot de passe cloud n'est requis.
+Le programme crée custom_components/epever_local/native_init.bin sans afficher
+la négociation. Il refuse d'écraser un fichier existant. L'option --output permet
+de choisir un autre emplacement. Les captures dépourvues d'initialisation ou
+présentant plusieurs initialisations distinctes sont refusées.
 
-Installation manuelle : copier le dossier `epever_local` dans `custom_components`,
-avec `native_init.bin` et `translations`, redémarrer HA, puis ajouter **EPEVER
-Local** dans Appareils et services. Adresse 192.168.1.100, port 8899, unité 10,
-intervalle 5 s. Les mesures apparaissent sous un équipement UP5000-HM8042.
-Pour revenir en arrière, supprimer l'entrée d'intégration via HA ; le client est
-fermé à son déchargement. Aucun réglage de la clé n'a besoin d'être rétabli.
+## Copie et activation
 
-Le contrat MQTT ci-dessous reste une alternative prévue ; MQTT n'est pas nécessaire
-pour ce déploiement natif, et aucun broker n'a été installé pour l'occasion.
+Copier le dossier epever_local dans custom_components du répertoire de
+configuration Home Assistant. Le dossier doit contenir :
 
-Document de conception ; aucun publisher MQTT ni acquisition périodique encore
-implémenté dans le bridge MQTT. L'acquisition périodique est implémentée dans
-l'intégration native décrite ci-dessus.
+```text
+custom_components/epever_local/
+  __init__.py
+  client.py
+  config_flow.py
+  manifest.json
+  sensor.py
+  strings.json
+  native_init.bin
+  translations/
+    fr.json
+    en.json
+```
 
-Un équipement `EPEVER UP5000-HM8042`, avec identifiant configuré stable indépendant
-de l'IP, regroupera uniquement les mesures validées. Chaque entité aura unique_id,
-unité, device_class appropriée et state_class adaptée. Les valeurs instantanées
-utiliseront `measurement`. Les compteurs d'énergie utiliseront Wh/kWh et `energy`,
-avec `total` ou `total_increasing` selon leur comportement de remise à zéro
-effectivement vérifié. Une puissance en W seule ne constitue pas un compteur
-d'énergie pour le tableau de bord Énergie.
-[Classes de capteurs officielles](https://contributors.home-assistant.io/core/entities/sensor/).
+Ne pas copier __pycache__. Redémarrer Home Assistant, puis ouvrir **Paramètres →
+Appareils et services → Ajouter une intégration → EPEVER Local**.
 
-Prévoir disponibilité avec testament MQTT, expiration des mesures, horodatage UTC
-de dernière lecture réussie et republication de Discovery au redémarrage de HA
-ou conservation des configurations. Une erreur n'enverra pas zéro comme mesure.
-[MQTT Discovery officiel](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery).
+| Paramètre | Description | Défaut |
+|---|---|---|
+| Adresse IP | Adresse LAN réelle de la clé | 192.168.1.100, exemple |
+| Port TCP | Service natif | 8899 |
+| Identifiant | Adresse Modbus configurée sur l'onduleur | 10 |
+| Intervalle | Délai entre acquisitions | 5 s, plage 5–300 s |
+| Batterie installée | Attribut de contexte des mesures batterie | Non |
+| Panneaux installés | Attribut de contexte des mesures PV | Non |
 
-Le service futur utilisera une seule connexion à la clé, un intervalle par défaut
-de 5 s configurable, des timeouts, un recul progressif après panne et un verrou
-empêchant les lectures simultanées dans le processus. Les autres applications
-devront libérer la clé. Les identifiants MQTT resteront hors logs et dépôt.
+L'assistant vérifie une lecture avant de créer l'entrée. Les capteurs sont
+regroupés dans un équipement EPEVER UP5000-HM8042. Aucune modification YAML
+globale ni configuration du mode TCP de la clé n'est nécessaire.
+
+## Entités et disponibilité
+
+L'intégration expose 21 capteurs et 5 diagnostics, soit 26 entités. Les identifiants
+sont stables et liés à la passerelle, indépendamment de son adresse IP.
+Les compteurs d'énergie utilisent kWh, energy et total_increasing.
+
+Une acquisition réussie actualise le diagnostic Dernière lecture. Une erreur
+rend les entités indisponibles ; les registres optionnels non pris en charge
+restent indisponibles. Un zéro réellement reçu reste un zéro.
+
+Sans batterie, le SOC brut peut valoir zéro : vérifier battery_installed avant
+d'utiliser cette valeur dans une alarme. Même principe pour panels_installed.
+
+## Exploitation
+
+Une connexion persistante unique dessert tous les capteurs. Le temps de lecture
+s'ajoute au délai configuré : pour 5 secondes, prévoir environ 6 à 7 secondes
+entre deux jeux de mesures. Les erreurs déclenchent une reconnexion progressive,
+avec une attente plafonnée à 60 secondes.
+
+Fermer les autres lecteurs si la clé ne supporte pas plusieurs clients simultanés.
+Pour modifier les paramètres dans cette version, supprimer puis recréer l'entrée
+avec le même fichier d'initialisation. Désactiver ou supprimer l'entrée arrête
+les acquisitions ; aucun réglage de l'onduleur n'est à rétablir.
+
+La session est également conservée dans l'entrée de configuration HA. Traiter
+les sauvegardes Home Assistant comme des données privées.
+
+## Dépannage
+
+| Symptôme | Vérifications |
+|---|---|
+| Intégration absente | Emplacement du dossier, manifest.json, redémarrage HA |
+| Initialisation impossible | Présence du fichier, correspondance avec la clé, session complète |
+| Connexion impossible | IP, TCP 8899, routage/VLAN, autres clients connectés |
+| Pas de réponse Modbus | Gamme UP HI, identifiant réel, liaison série compatible |
+| PV ou batterie à zéro | Présence physique de ces équipements et attributs de contexte |
+
+Ne pas publier PCAP, initialisation native ou sauvegardes HA dans une demande de support.
